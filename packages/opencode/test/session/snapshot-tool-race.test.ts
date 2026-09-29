@@ -25,6 +25,8 @@ import { Database } from "@opencode-ai/core/database/database"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+import { answerPrompts } from "../flocta/answer-prompts"
+import { Permission } from "../../src/permission"
 import { TestLLMServer } from "../lib/llm-server"
 
 import { LSP } from "@/lsp/lsp"
@@ -84,6 +86,8 @@ const root = LayerNode.group([
   SessionSummary.node,
   Database.node,
   CrossSpawnSpawner.node,
+  // Flocta AC 10.1.3: the test answers its session's prompts, so it needs the service.
+  Permission.node,
   LayerNode.make({ service: TestLLMServer, layer: TestLLMServer.layer, deps: [] }),
 ])
 const it = testEffect(
@@ -151,6 +155,8 @@ it.live("tool execution produces non-empty session diff (snapshot race)", () =>
       })
 
       // Run the agent loop
+      // Flocta AC 10.1.3: the command asks; answer it as a person would.
+      yield* answerPrompts(session.id).pipe(Effect.forkChild)
       const result = yield* prompt.loop({ sessionID: session.id })
       expect(result.info.role).toBe("assistant")
 

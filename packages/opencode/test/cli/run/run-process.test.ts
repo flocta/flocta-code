@@ -28,9 +28,10 @@ describe("opencode run (non-interactive subprocess)", () => {
     ({ llm, opencode }) =>
       Effect.gen(function* () {
         yield* llm.push(
-          reply().text("  before tool  ").tool("bash", {
-            command: "printf tool-output",
-            description: "Print deterministic output",
+          reply().text("  before tool  ").tool("glob", {
+            // Flocta AC 10.1.3: `run` refuses a command it cannot confirm, whatever the flag;
+            // this test is about output around a tool, so its call is one the policy does not gate.
+            pattern: "*.md",
           }),
         )
         yield* llm.text("  after tool  ")
@@ -89,9 +90,10 @@ describe("opencode run (non-interactive subprocess)", () => {
     ({ llm, opencode }) =>
       Effect.gen(function* () {
         yield* llm.push(
-          reply().text("partial response").tool("bash", {
-            command: "printf tool",
-            description: "Print deterministic output",
+          reply().text("partial response").tool("glob", {
+            // Flocta AC 10.1.3: `run` refuses a command it cannot confirm; this test is
+            // about stream recovery, so its tool call is one the policy does not gate.
+            pattern: "*.md",
           }),
         )
         yield* llm.fail("upstream provider exploded mid-stream")
@@ -169,9 +171,10 @@ describe("opencode run (non-interactive subprocess)", () => {
     ({ llm, opencode }) =>
       Effect.gen(function* () {
         yield* llm.push(
-          reply().reason("reasoning").text("before").tool("bash", {
-            command: "printf tool",
-            description: "Print deterministic output",
+          reply().reason("reasoning").text("before").tool("glob", {
+            // Flocta AC 10.1.3: `run` refuses a command it cannot confirm, whatever the flag;
+            // this test is about output around a tool, so its call is one the policy does not gate.
+            pattern: "*.md",
           }),
         )
         yield* llm.text("after")
@@ -199,7 +202,7 @@ describe("opencode run (non-interactive subprocess)", () => {
         expect(events.find((event) => event.type === "tool_use")?.part).toEqual(
           expect.objectContaining({
             type: "tool",
-            tool: "bash",
+            tool: "glob",
             state: expect.objectContaining({ status: "completed" }),
           }),
         )
@@ -218,9 +221,10 @@ describe("opencode run (non-interactive subprocess)", () => {
     ({ llm, opencode }) =>
       Effect.gen(function* () {
         yield* llm.push(
-          reply().text("partial json").tool("bash", {
-            command: "printf tool",
-            description: "Print deterministic output",
+          reply().text("partial json").tool("glob", {
+            // Flocta AC 10.1.3: `run` refuses a command it cannot confirm; this test is
+            // about stream recovery, so its tool call is one the policy does not gate.
+            pattern: "*.md",
           }),
         )
         yield* llm.fail("provider failed")
@@ -249,7 +253,7 @@ describe("opencode run (non-interactive subprocess)", () => {
   )
 
   cliIt.concurrent(
-    "rejects requested permissions by default and allows them with the dangerous flag",
+    "rejects requested permissions by default, and the dangerous flag never approves a command (Flocta AC 10.1.3)",
     ({ home, llm, opencode }) =>
       Effect.gen(function* () {
         yield* llm.tool("bash", { command: "rm -f denied-file", description: "Remove a test file" })
@@ -260,15 +264,19 @@ describe("opencode run (non-interactive subprocess)", () => {
         expect(denied.stdout).toBe("")
 
         yield* llm.reset
-        yield* llm.tool("bash", { command: "rm -f allowed-file", description: "Remove a test file" })
+        // Upstream approved the command here. Flocta Code asks a person before any
+        // shell command, and `run` has no one to ask, so the flag does not approve it.
+        yield* llm.tool("bash", { command: "touch approved-marker", description: "Create a marker" })
         yield* llm.text("continued after approval")
-        const allowed = yield* opencode.run("request permission", {
-          permission: { bash: "ask" },
+        const refused = yield* opencode.run("request permission", {
+          permission: { bash: "allow" },
           extraArgs: ["--dangerously-skip-permissions"],
         })
-        opencode.expectExit(allowed, 0)
-        expect(allowed.stderr).not.toContain("permission requested: bash")
-        expect(allowed.stdout).toContain("continued after approval")
+        opencode.expectExit(refused, 0)
+        expect(refused.stderr).toContain("permission requested: bash")
+        expect(refused.stderr).toContain("Flocta Code asks a person before any file write or shell command")
+        expect(refused.stdout).not.toContain("continued after approval")
+        expect(yield* Effect.promise(() => Bun.file(`${home}/approved-marker`).exists())).toBe(false)
 
         yield* llm.reset
         yield* llm.tool("bash", { command: "touch explicitly-denied", description: "Create a denied marker" })

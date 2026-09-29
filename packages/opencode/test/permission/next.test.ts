@@ -555,17 +555,20 @@ test("disabled - specific allow overrides wildcard deny", () => {
 
 // ask tests
 
+// Flocta AC 10.1.3: a configured allow no longer pre-approves `bash` or `edit`
+// (test/flocta/confirmation.test.ts); these keep upstream's check on a permission
+// the policy does not gate.
 it.instance(
   "ask - resolves immediately when action is allow",
   () =>
     Effect.gen(function* () {
       const result = yield* ask({
         sessionID: SessionID.make("session_test"),
-        permission: "bash",
+        permission: "webfetch",
         patterns: ["ls"],
         metadata: {},
         always: [],
-        ruleset: [{ permission: "bash", pattern: "*", action: "allow" }],
+        ruleset: [{ permission: "webfetch", pattern: "*", action: "allow" }],
       })
       expect(result).toBeUndefined()
     }),
@@ -774,7 +777,7 @@ it.instance(
 )
 
 it.instance(
-  "reply - always persists approval and resolves",
+  "reply - always persists approval for the same session only (Flocta AC 10.1.3)",
   () =>
     Effect.gen(function* () {
       const fiber = yield* ask({
@@ -791,15 +794,30 @@ it.instance(
       yield* reply({ requestID: PermissionV1.ID.make("per_test3"), reply: "always" })
       yield* Fiber.join(fiber)
 
-      const result = yield* ask({
-        sessionID: SessionID.make("session_test2"),
+      const same = yield* ask({
+        sessionID: SessionID.make("session_test"),
         permission: "bash",
         patterns: ["ls"],
         metadata: {},
         always: [],
         ruleset: [],
       })
-      expect(result).toBeUndefined()
+      expect(same).toBeUndefined()
+
+      // Upstream carried the approval to every session; Flocta Code does not.
+      const other = yield* ask({
+        id: PermissionV1.ID.make("per_test3b"),
+        sessionID: SessionID.make("session_test2"),
+        permission: "bash",
+        patterns: ["ls"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      const pending = yield* waitForPending(1)
+      expect(pending[0].sessionID).toBe(SessionID.make("session_test2"))
+      yield* rejectAll()
+      yield* fail(Fiber.join(other))
     }),
   { git: true },
 )
@@ -1110,11 +1128,11 @@ it.instance(
     Effect.gen(function* () {
       const result = yield* ask({
         sessionID: SessionID.make("session_test"),
-        permission: "bash",
+        permission: "webfetch",
         patterns: ["echo hello", "ls -la", "pwd"],
         metadata: {},
         always: [],
-        ruleset: [{ permission: "bash", pattern: "*", action: "allow" }],
+        ruleset: [{ permission: "webfetch", pattern: "*", action: "allow" }],
       })
       expect(result).toBeUndefined()
     }),

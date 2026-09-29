@@ -52,6 +52,7 @@ import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { Format } from "../../src/format"
 import { TestInstance } from "../fixture/fixture"
 import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
+import { answerPrompts } from "../flocta/answer-prompts"
 import { reply, TestLLMServer } from "../lib/llm-server"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
@@ -1954,6 +1955,8 @@ unix(
         workdir: path.resolve(dir),
       })
 
+      // Flocta AC 10.1.3: the command asks; answer it as a person would.
+      yield* answerPrompts(chat.id).pipe(Effect.forkChild)
       const run = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
       yield* llm.wait(1)
       yield* pollWithTimeout(
