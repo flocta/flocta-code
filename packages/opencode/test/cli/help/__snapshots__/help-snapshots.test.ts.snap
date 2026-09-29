@@ -103,7 +103,8 @@ Options:
                                                                                             [string]
       --thinking     show thinking blocks                                                  [boolean]
   -i, --interactive  run in direct interactive split-footer mode          [boolean] [default: false]
-      --auto         auto-approve permissions that are not explicitly denied (dangerous!)
+      --auto         auto-approve permissions that are not explicitly denied — never a file write or
+                     a shell command, which Flocta Code always asks a person to confirm
                                                                           [boolean] [default: false]"
 `;
 

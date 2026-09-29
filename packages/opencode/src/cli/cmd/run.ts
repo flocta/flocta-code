@@ -1,4 +1,5 @@
 import type { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { FloctaPolicy } from "@/flocta/policy"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 // CLI entry point for `opencode run` and `opencode --mini`.
 //
@@ -241,7 +242,8 @@ export const RunCommand = effectCmd({
       })
       .option("auto", {
         type: "boolean",
-        describe: "auto-approve permissions that are not explicitly denied (dangerous!)",
+        describe:
+          "auto-approve permissions that are not explicitly denied — never a file write or a shell command, which Flocta Code always asks a person to confirm",
         default: false,
       })
       .option("yolo", {
@@ -802,7 +804,10 @@ export const RunCommand = effectCmd({
               const permission = event.properties
               if (!sessions.has(permission.sessionID)) continue
 
-              if (auto) {
+              // Flocta AC 10.1.3: `run` has no one to confirm a write or a command,
+              // so neither `--auto` nor its aliases approve one.
+              const gated = FloctaPolicy.GATED_PERMISSIONS.has(permission.permission)
+              if (auto && !gated) {
                 await client.permission.reply({
                   requestID: permission.id,
                   reply: "once",
@@ -811,7 +816,10 @@ export const RunCommand = effectCmd({
                 UI.println(
                   UI.Style.TEXT_WARNING_BOLD + "!",
                   UI.Style.TEXT_NORMAL +
-                    `permission requested: ${permission.permission} (${permission.patterns.join(", ")}); auto-rejecting`,
+                    `permission requested: ${permission.permission} (${permission.patterns.join(", ")}); auto-rejecting` +
+                    (gated
+                      ? " — Flocta Code asks a person before any file write or shell command; run it interactively to confirm"
+                      : ""),
                 )
                 await client.permission.reply({
                   requestID: permission.id,

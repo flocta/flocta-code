@@ -6,6 +6,7 @@ import { Deferred, Effect, Layer, Context } from "effect"
 import os from "os"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { EventV2Bridge } from "@/event-v2-bridge"
+import { FloctaPolicy } from "@/flocta/policy"
 
 export const Event = PermissionV1.Event
 
@@ -22,7 +23,17 @@ interface PendingEntry {
 
 interface State {
   pending: Map<PermissionV1.ID, PendingEntry>
-  approved: PermissionV1.Rule[]
+  /** Flocta AC 10.1.3: "always" approvals, per session — never shared across sessions. */
+  approved: Map<string, PermissionV1.Rule[]>
+}
+
+function approvedFor(state: State, sessionID: string): PermissionV1.Rule[] {
+  let rules = state.approved.get(sessionID)
+  if (!rules) {
+    rules = []
+    state.approved.set(sessionID, rules)
+  }
+  return rules
 }
 
 export function evaluate(permission: string, pattern: string, ...rulesets: PermissionV1.Ruleset[]): PermissionV1.Rule {
@@ -48,8 +59,8 @@ const layer = Layer.effect(
         void ctx
         const state = {
           pending: new Map<PermissionV1.ID, PendingEntry>(),
-          approved: [],
-        }
+          approved: new Map<string, PermissionV1.Rule[]>(),
+        } satisfies State
 
         yield* Effect.addFinalizer(() =>
           Effect.gen(function* () {
@@ -65,12 +76,14 @@ const layer = Layer.effect(
     )
 
     const ask = Effect.fn("Permission.ask")(function* (input: PermissionV1.AskInput) {
-      const { approved, pending } = yield* InstanceState.get(state)
+      const current = yield* InstanceState.get(state)
+      const { pending } = current
       const { ruleset, ...request } = input
+      const approved = approvedFor(current, request.sessionID)
       let needsAsk = false
 
       for (const pattern of request.patterns) {
-        const rule = evaluate(request.permission, pattern, ruleset, approved)
+        const rule = FloctaPolicy.decide(request.permission, pattern, ruleset, approved)
         yield* Effect.logInfo("evaluated", { permission: request.permission, pattern, action: rule })
         if (rule.action === "deny") {
           return yield* new PermissionV1.DeniedError({
@@ -107,9 +120,11 @@ const layer = Layer.effect(
     })
 
     const reply = Effect.fn("Permission.reply")(function* (input: PermissionV1.ReplyInput) {
-      const { approved, pending } = yield* InstanceState.get(state)
+      const current = yield* InstanceState.get(state)
+      const { pending } = current
       const existing = pending.get(input.requestID)
       if (!existing) return yield* new PermissionV1.NotFoundError({ requestID: input.requestID })
+      const approved = approvedFor(current, existing.info.sessionID)
 
       pending.delete(input.requestID)
       yield* events.publish(Event.Replied, {
